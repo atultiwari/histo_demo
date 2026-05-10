@@ -54,11 +54,12 @@ service cloud.firestore {
 
     function isValidTemplate(data) {
       return data.keys().hasAll(['authorId', 'name', 'content', 'isPublic', 'createdAt', 'updatedAt'])
-        && data.keys().size() == 6
         && data.authorId == request.auth.uid
         && data.name is string && data.name.size() <= 100
         && data.content is string && data.content.size() <= 50000
         && data.isPublic is bool
+        && (data.get('organSystem', '') is string && data.get('organSystem', '').size() <= 100)
+        && (data.get('clinicalKeywords', '') is string && data.get('clinicalKeywords', '').size() <= 500)
         && data.createdAt == request.time
         && data.updatedAt == request.time;
     }
@@ -108,7 +109,7 @@ service cloud.firestore {
       allow create: if isSignedIn() && isValidId(templateId) && isValidTemplate(incoming());
       allow update: if isSignedIn() && isValidId(templateId) && (
         (existing().authorId == request.auth.uid && (
-          incoming().diff(existing()).affectedKeys().hasOnly(['name', 'content', 'isPublic', 'updatedAt'])
+          incoming().diff(existing()).affectedKeys().hasOnly(['name', 'content', 'isPublic', 'organSystem', 'clinicalKeywords', 'updatedAt'])
           && incoming().updatedAt == request.time
         )) || isAdmin()
       );

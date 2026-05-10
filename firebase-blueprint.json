@@ -51,6 +51,8 @@
       "properties": {
         "authorId": { "type": "string" },
         "name": { "type": "string" },
+        "organSystem": { "type": "string" },
+        "clinicalKeywords": { "type": "string" },
         "isPublic": { "type": "boolean" },
         "content": { "type": "string" },
         "createdAt": { "type": "string" },

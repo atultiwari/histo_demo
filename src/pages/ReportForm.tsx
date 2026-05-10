@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { db, auth } from '../firebase';
-import { collection, doc, setDoc, getDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, setDoc, getDoc, updateDoc, serverTimestamp, or } from 'firebase/firestore';
 import { useNavigate, useParams } from 'react-router-dom';
 import { format } from 'date-fns';
 import { handleFirestoreError, OperationType } from '../error-handler';
@@ -16,6 +16,8 @@ export default function ReportForm() {
   const [saving, setSaving] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiSuggestion, setAiSuggestion] = useState<string | null>(null);
+  const [templates, setTemplates] = useState<any[]>([]);
+  const [suggestedTemplates, setSuggestedTemplates] = useState<any[]>([]);
 
   const [formData, setFormData] = useState({
     patientName: '',
@@ -137,6 +139,65 @@ export default function ReportForm() {
     }
   };
 
+  useEffect(() => {
+    const fetchTemplates = async () => {
+      if (!auth.currentUser) return;
+      try {
+        const q = query(
+          collection(db, 'templates'),
+          or(
+            where('authorId', '==', auth.currentUser.uid),
+            where('isPublic', '==', true)
+          )
+        );
+        const snapshot = await getDocs(q);
+        const fetched: any[] = [];
+        snapshot.forEach(doc => {
+          fetched.push({ id: doc.id, ...doc.data() });
+        });
+        setTemplates(fetched);
+      } catch (err) {
+        console.error("Failed to fetch templates", err);
+      }
+    };
+    fetchTemplates();
+  }, []);
+
+  useEffect(() => {
+    if (!formData.organSystem && !formData.clinicalHistory) {
+      setSuggestedTemplates([]);
+      return;
+    }
+
+    const filtered = templates.filter(t => {
+      // Must match organ system if template has one specified
+      const osMatch = !t.organSystem || t.organSystem === formData.organSystem;
+      return osMatch;
+    }).map(t => {
+      let score = 0;
+      if (t.organSystem === formData.organSystem) score += 10;
+      
+      if (t.clinicalKeywords && formData.clinicalHistory) {
+        const keywords = t.clinicalKeywords.toLowerCase().split(',').map((s: string) => s.trim());
+        const history = formData.clinicalHistory.toLowerCase();
+        keywords.forEach((kw: string) => {
+          if (kw && history.includes(kw)) score += 5;
+        });
+      }
+      return { ...t, score };
+    }).filter(t => t.score > 0)
+      .sort((a, b) => b.score - a.score);
+
+    setSuggestedTemplates(filtered);
+  }, [formData.organSystem, formData.clinicalHistory, templates]);
+
+  const applyTemplate = (content: string) => {
+    setFormData(prev => ({
+      ...prev,
+      microscopicFindings: content
+    }));
+    setActiveTab('microscopic');
+  };
   const handleImproveText = async (field: 'grossFindings' | 'microscopicFindings') => {
     if (!formData[field]) return;
     setAiLoading(true);
@@ -158,6 +219,32 @@ export default function ReportForm() {
     { id: 'microscopic', label: 'Microscopic & IHC' },
     { id: 'diagnosis', label: 'Final Diagnosis' }
   ];
+
+  const TemplateSuggestions = () => (
+    <div className="mt-4 p-4 bg-blue-50 rounded-lg border border-blue-100">
+      <h4 className="text-[10px] font-bold uppercase text-blue-600 mb-2">Suggested Templates</h4>
+      <div className="grid grid-cols-1 gap-2">
+        {suggestedTemplates.slice(0, 4).map(t => (
+          <button 
+            key={t.id}
+            onClick={() => applyTemplate(t.content)}
+            className="w-full text-left p-2.5 bg-white hover:bg-blue-100 rounded-lg border border-blue-200 transition group shadow-sm hover:shadow"
+          >
+            <div className="flex justify-between items-center">
+              <span className="text-xs font-bold text-slate-700">{t.name}</span>
+              <span className="text-[10px] text-blue-400 group-hover:text-blue-600 font-bold">Apply →</span>
+            </div>
+            {(t.organSystem || t.clinicalKeywords) && (
+              <div className="flex gap-2 mt-1">
+                {t.organSystem && <span className="text-[8px] px-1.5 py-0.5 bg-slate-100 text-slate-500 rounded uppercase font-bold">{t.organSystem}</span>}
+                {t.clinicalKeywords && <span className="text-[8px] text-blue-400 italic truncate">Matched finding: {t.clinicalKeywords}</span>}
+              </div>
+            )}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
 
   return (
     <div className="relative h-full flex flex-col bg-[#f1f5f9] font-sans text-slate-900">
@@ -247,6 +334,8 @@ export default function ReportForm() {
                     <option value="Prostate">Prostate</option>
                     <option value="Other">Other</option>
                   </select>
+                  
+                  {suggestedTemplates.length > 0 && <TemplateSuggestions />}
                 </div>
               </div>
 
@@ -275,6 +364,7 @@ export default function ReportForm() {
               <div>
                 <label className="block text-[10px] uppercase font-bold text-slate-400 tracking-widest mb-2">Clinical History / Provisional Diagnosis</label>
                 <textarea rows={4} name="clinicalHistory" value={formData.clinicalHistory} onChange={handleChange} placeholder="Enter relevant history, radiology findings..." className="w-full px-4 py-3 border border-slate-300 bg-slate-50 border-dashed rounded-lg focus:ring-blue-500 focus:border-blue-500 sm:text-sm"></textarea>
+                {suggestedTemplates.length > 0 && <TemplateSuggestions />}
               </div>
               <hr className="border-slate-100" />
               <div>

@@ -10,14 +10,18 @@ interface Template {
   content: string;
   authorId?: string;
   isPublic?: boolean;
+  organSystem?: string;
+  clinicalKeywords?: string;
 }
+
+const ORGAN_SYSTEMS = ["Gastrointestinal", "Gynecologic", "Breast", "Dermatopathology", "Genitourinary", "Respiratory", "Head and Neck", "Central Nervous System", "Prostate", "Other"];
 
 export default function Templates() {
   const [templates, setTemplates] = useState<Template[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [viewingTemplate, setViewingTemplate] = useState<Template | null>(null);
-  const [newTemplate, setNewTemplate] = useState({ name: '', content: '', isPublic: false });
+  const [newTemplate, setNewTemplate] = useState({ name: '', content: '', isPublic: false, organSystem: '', clinicalKeywords: '' });
   const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
 
   // AI Gen State
@@ -62,6 +66,8 @@ export default function Templates() {
           name: newTemplate.name,
           content: newTemplate.content,
           isPublic: newTemplate.isPublic,
+          organSystem: newTemplate.organSystem,
+          clinicalKeywords: newTemplate.clinicalKeywords,
           updatedAt: serverTimestamp(),
         });
       } else {
@@ -70,6 +76,8 @@ export default function Templates() {
           name: newTemplate.name,
           content: newTemplate.content,
           isPublic: newTemplate.isPublic,
+          organSystem: newTemplate.organSystem,
+          clinicalKeywords: newTemplate.clinicalKeywords,
           authorId: auth.currentUser.uid,
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
@@ -94,14 +102,20 @@ export default function Templates() {
   }
 
   const handleEdit = (tmpl: Template) => {
-    setNewTemplate({ name: tmpl.name, content: tmpl.content, isPublic: tmpl.isPublic || false });
+    setNewTemplate({ 
+      name: tmpl.name, 
+      content: tmpl.content, 
+      isPublic: tmpl.isPublic || false,
+      organSystem: tmpl.organSystem || '',
+      clinicalKeywords: tmpl.clinicalKeywords || ''
+    });
     setEditingTemplateId(tmpl.id);
     setShowModal(true);
   };
 
   const handleCloseModal = () => {
     setShowModal(false);
-    setNewTemplate({ name: '', content: '', isPublic: false });
+    setNewTemplate({ name: '', content: '', isPublic: false, organSystem: '', clinicalKeywords: '' });
     setEditingTemplateId(null);
     setShowAiGen(false);
     setAiHistory('');
@@ -243,6 +257,29 @@ export default function Templates() {
                   onChange={e => setNewTemplate({...newTemplate, name: e.target.value})}
                   placeholder="e.g. Normal Appendix"
                 />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-[10px] uppercase font-bold text-slate-400 tracking-widest mb-1.5">Organ System</label>
+                  <select 
+                    className="w-full border border-slate-300 rounded-md p-2 focus:ring-blue-500 focus:border-blue-500 bg-slate-50 text-sm"
+                    value={newTemplate.organSystem}
+                    onChange={e => setNewTemplate({...newTemplate, organSystem: e.target.value})}
+                  >
+                    <option value="">None / General</option>
+                    {ORGAN_SYSTEMS.map(os => <option key={os} value={os}>{os}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[10px] uppercase font-bold text-slate-400 tracking-widest mb-1.5">Clinical Keywords</label>
+                  <input 
+                    type="text" 
+                    className="w-full border border-slate-300 rounded-md p-2 focus:ring-blue-500 focus:border-blue-500 bg-slate-50 text-sm"
+                    value={newTemplate.clinicalKeywords}
+                    onChange={e => setNewTemplate({...newTemplate, clinicalKeywords: e.target.value})}
+                    placeholder="e.g. pain, right lower quadrant"
+                  />
+                </div>
               </div>
               <div>
                 <label className="block text-[10px] uppercase font-bold text-slate-400 tracking-widest mb-1.5">Content</label>
