@@ -1,0 +1,76 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile with role.",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" },
+        "name": { "type": "string" },
+        "role": { "type": "string", "enum": ["Pathologist", "Technician", "Admin"] },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["email", "name", "role", "createdAt", "updatedAt"]
+    },
+    "Report": {
+      "title": "Pathology Report",
+      "description": "A single histopathology report.",
+      "type": "object",
+      "properties": {
+        "authorId": { "type": "string" },
+        "patientName": { "type": "string" },
+        "age": { "type": "number" },
+        "gender": { "type": "string" },
+        "hospitalNumber": { "type": "string" },
+        "reportNumber": { "type": "string" },
+        "referringDoctor": { "type": "string" },
+        "dateOfProcedure": { "type": "string" },
+        "dateOfReport": { "type": "string" },
+        "specimenReceivedDate": { "type": "string" },
+        "organSystem": { "type": "string" },
+        "clinicalHistory": { "type": "string" },
+        "grossFindings": { "type": "string" },
+        "microscopicFindings": { "type": "string" },
+        "ihcAdvice": { "type": "array", "items": { "type": "string" } },
+        "finalDiagnosis": { "type": "string" },
+        "comments": { "type": "string" },
+        "status": { "type": "string", "enum": ["Pending", "Finalized", "Archived"] },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": [
+        "authorId", "patientName", "age", "gender", "hospitalNumber",
+        "reportNumber", "status", "createdAt", "updatedAt"
+      ]
+    },
+    "Template": {
+      "title": "Report Template",
+      "description": "Reusable template for reporting.",
+      "type": "object",
+      "properties": {
+        "authorId": { "type": "string" },
+        "name": { "type": "string" },
+        "isPublic": { "type": "boolean" },
+        "content": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["authorId", "name", "content", "isPublic", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "User" },
+      "description": "User profiles by their uid."
+    },
+    "/reports/{reportId}": {
+      "schema": { "$ref": "Report" },
+      "description": "Pathology reports."
+    },
+    "/templates/{templateId}": {
+      "schema": { "$ref": "Template" },
+      "description": "User saved templates."
+    }
+  }
+}
