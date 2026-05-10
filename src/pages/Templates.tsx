@@ -2,12 +2,17 @@ import { useEffect, useState } from 'react';
 import { db, auth } from '../firebase';
 import { collection, query, where, getDocs, doc, setDoc, updateDoc, deleteDoc, serverTimestamp, or } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from '../error-handler';
-import { generateTemplate } from '../aiService';
+import { generateTemplate, parseTemplateSections } from '../aiService';
 
 interface Template {
   id: string;
   name: string;
-  content: string;
+  content?: string;
+  clinicalHistory?: string;
+  grossFindings?: string;
+  microscopicFindings?: string;
+  ihcAdvice?: string;
+  finalDiagnosis?: string;
   authorId?: string;
   isPublic?: boolean;
   organSystem?: string;
@@ -21,7 +26,18 @@ export default function Templates() {
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [viewingTemplate, setViewingTemplate] = useState<Template | null>(null);
-  const [newTemplate, setNewTemplate] = useState({ name: '', content: '', isPublic: false, organSystem: '', clinicalKeywords: '' });
+  const [newTemplate, setNewTemplate] = useState({ 
+    name: '', 
+    content: '', 
+    clinicalHistory: '',
+    grossFindings: '',
+    microscopicFindings: '',
+    ihcAdvice: '',
+    finalDiagnosis: '',
+    isPublic: false, 
+    organSystem: '', 
+    clinicalKeywords: '' 
+  });
   const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
 
   // AI Gen State
@@ -29,6 +45,7 @@ export default function Templates() {
   const [aiHistory, setAiHistory] = useState('');
   const [aiSpecimen, setAiSpecimen] = useState('');
   const [aiGenerating, setAiGenerating] = useState(false);
+  const [aiParsing, setAiParsing] = useState(false);
 
   useEffect(() => {
     fetchTemplates();
@@ -58,13 +75,24 @@ export default function Templates() {
   };
 
   const handleSave = async () => {
-    if (!auth.currentUser || !newTemplate.name || !newTemplate.content) return;
+    const hasSection = newTemplate.clinicalHistory || newTemplate.grossFindings || newTemplate.microscopicFindings || newTemplate.finalDiagnosis || newTemplate.ihcAdvice;
+    if (!auth.currentUser || !newTemplate.name || (!newTemplate.content && !hasSection)) {
+      if (!newTemplate.name) alert("Template name is required.");
+      else if (!newTemplate.content && !hasSection) alert("Template content or sections (Clinical/Gross/Micro/Diagnosis) are required.");
+      return;
+    }
+    setLoading(true);
     try {
       if (editingTemplateId) {
         const templateRef = doc(db, 'templates', editingTemplateId);
         await updateDoc(templateRef, {
           name: newTemplate.name,
           content: newTemplate.content,
+          clinicalHistory: newTemplate.clinicalHistory,
+          grossFindings: newTemplate.grossFindings,
+          microscopicFindings: newTemplate.microscopicFindings,
+          ihcAdvice: newTemplate.ihcAdvice,
+          finalDiagnosis: newTemplate.finalDiagnosis,
           isPublic: newTemplate.isPublic,
           organSystem: newTemplate.organSystem,
           clinicalKeywords: newTemplate.clinicalKeywords,
@@ -75,6 +103,11 @@ export default function Templates() {
         await setDoc(templateRef, {
           name: newTemplate.name,
           content: newTemplate.content,
+          clinicalHistory: newTemplate.clinicalHistory,
+          grossFindings: newTemplate.grossFindings,
+          microscopicFindings: newTemplate.microscopicFindings,
+          ihcAdvice: newTemplate.ihcAdvice,
+          finalDiagnosis: newTemplate.finalDiagnosis,
           isPublic: newTemplate.isPublic,
           organSystem: newTemplate.organSystem,
           clinicalKeywords: newTemplate.clinicalKeywords,
@@ -84,27 +117,40 @@ export default function Templates() {
         });
       }
       handleCloseModal();
-      fetchTemplates();
+      await fetchTemplates();
     } catch (err) {
+      console.error("Save error:", err);
       handleFirestoreError(err, editingTemplateId ? OperationType.UPDATE : OperationType.CREATE, 'templates');
+      alert("Failed to save template. Please check your permissions.");
+    } finally {
+      setLoading(false);
     }
   };
 
   const handleDelete = async (id: string) => {
     if (!auth.currentUser) return;
     if (!window.confirm("Are you sure you want to delete this template?")) return;
+    setLoading(true);
     try {
       await deleteDoc(doc(db, 'templates', id));
-      fetchTemplates();
+      await fetchTemplates();
     } catch (err) {
       handleFirestoreError(err, OperationType.DELETE, 'templates');
+      alert("Failed to delete template.");
+    } finally {
+      setLoading(false);
     }
   }
 
   const handleEdit = (tmpl: Template) => {
     setNewTemplate({ 
       name: tmpl.name, 
-      content: tmpl.content, 
+      content: tmpl.content || '', 
+      clinicalHistory: tmpl.clinicalHistory || '',
+      grossFindings: tmpl.grossFindings || '',
+      microscopicFindings: tmpl.microscopicFindings || '',
+      ihcAdvice: tmpl.ihcAdvice || '',
+      finalDiagnosis: tmpl.finalDiagnosis || '',
       isPublic: tmpl.isPublic || false,
       organSystem: tmpl.organSystem || '',
       clinicalKeywords: tmpl.clinicalKeywords || ''
@@ -115,7 +161,18 @@ export default function Templates() {
 
   const handleCloseModal = () => {
     setShowModal(false);
-    setNewTemplate({ name: '', content: '', isPublic: false, organSystem: '', clinicalKeywords: '' });
+    setNewTemplate({ 
+      name: '', 
+      content: '', 
+      clinicalHistory: '',
+      grossFindings: '',
+      microscopicFindings: '',
+      ihcAdvice: '',
+      finalDiagnosis: '',
+      isPublic: false, 
+      organSystem: '', 
+      clinicalKeywords: '' 
+    });
     setEditingTemplateId(null);
     setShowAiGen(false);
     setAiHistory('');
@@ -126,14 +183,49 @@ export default function Templates() {
     if (!aiHistory || !aiSpecimen) return;
     setAiGenerating(true);
     try {
+      console.log("Starting AI template generation for:", aiSpecimen);
       const generated = await generateTemplate(aiHistory, aiSpecimen);
-      setNewTemplate(prev => ({ ...prev, content: generated }));
+      console.log("AI Generation successful:", generated);
+      
+      setNewTemplate(prev => ({ 
+        ...prev, 
+        name: generated.name || prev.name || `Template for ${aiSpecimen}`,
+        clinicalHistory: generated.clinicalHistory || prev.clinicalHistory,
+        grossFindings: generated.grossFindings || prev.grossFindings,
+        microscopicFindings: generated.microscopicFindings || prev.microscopicFindings,
+        ihcAdvice: generated.ihcAdvice || prev.ihcAdvice,
+        finalDiagnosis: generated.finalDiagnosis || prev.finalDiagnosis,
+        content: ''
+      }));
       setShowAiGen(false);
-    } catch (error) {
-      console.error(error);
-      alert("Failed to generate AI template.");
+    } catch (error: any) {
+      console.error("AI Generation failed:", error);
+      alert(`AI generation failed: ${error.message || "Unknown error"}`);
     } finally {
       setAiGenerating(false);
+    }
+  };
+
+  const handleAutoParse = async () => {
+    if (!newTemplate.content && !newTemplate.microscopicFindings) return;
+    const textToParse = newTemplate.content || newTemplate.microscopicFindings;
+    setAiParsing(true);
+    try {
+      const result = await parseTemplateSections(textToParse);
+      setNewTemplate(prev => ({
+        ...prev,
+        clinicalHistory: result.clinicalHistory || prev.clinicalHistory,
+        grossFindings: result.grossFindings || prev.grossFindings,
+        microscopicFindings: result.microscopicFindings || prev.microscopicFindings,
+        ihcAdvice: result.ihcAdvice || prev.ihcAdvice,
+        finalDiagnosis: result.finalDiagnosis || prev.finalDiagnosis,
+        content: '' 
+      }));
+    } catch (error: any) {
+      console.error("Parse error:", error);
+      alert(`Failed to parse sections: ${error.message || "Unknown error"}`);
+    } finally {
+      setAiParsing(false);
     }
   };
 
@@ -154,13 +246,16 @@ export default function Templates() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {templates.map(tmpl => (
           <div key={tmpl.id} className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm relative group">
-            <div className="flex justify-between items-start mb-2">
-              <h3 className="font-bold text-slate-800 text-lg">{tmpl.name}</h3>
-              {tmpl.isPublic && (
-                <span className="px-2 py-0.5 bg-blue-50 text-blue-600 text-[10px] font-bold uppercase tracking-wider rounded">Public</span>
-              )}
+            <div className="space-y-1.5 mb-2">
+              <h3 className="font-bold text-slate-800 text-lg leading-tight">{tmpl.name}</h3>
+              <div className="flex flex-wrap gap-1.5">
+                {tmpl.organSystem && <span className="px-1.5 py-0.5 bg-slate-100 text-slate-500 text-[9px] font-bold uppercase rounded">{tmpl.organSystem}</span>}
+                {tmpl.isPublic && <span className="px-1.5 py-0.5 bg-blue-50 text-blue-600 text-[9px] font-bold uppercase rounded">Public</span>}
+              </div>
             </div>
-            <p className="text-sm text-slate-600 line-clamp-4 whitespace-pre-wrap">{tmpl.content}</p>
+            <div className="text-xs text-slate-600 line-clamp-3 italic mb-2">
+              {tmpl.finalDiagnosis || tmpl.microscopicFindings || tmpl.grossFindings || tmpl.content || "No preview available"}
+            </div>
             <div className="absolute top-4 right-4 hidden group-hover:flex gap-2">
               <button onClick={() => setViewingTemplate(tmpl)} className="p-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded" title="View">
                  View
@@ -271,7 +366,7 @@ export default function Templates() {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-[10px] uppercase font-bold text-slate-400 tracking-widest mb-1.5">Clinical Keywords</label>
+                  <label className="block text-[10px] uppercase font-bold text-slate-400 tracking-widest mb-1.5">Clinical Keywords (for matching)</label>
                   <input 
                     type="text" 
                     className="w-full border border-slate-300 rounded-md p-2 focus:ring-blue-500 focus:border-blue-500 bg-slate-50 text-sm"
@@ -281,16 +376,78 @@ export default function Templates() {
                   />
                 </div>
               </div>
-              <div>
-                <label className="block text-[10px] uppercase font-bold text-slate-400 tracking-widest mb-1.5">Content</label>
-                <textarea 
-                  rows={8}
-                  className="w-full border border-slate-300 rounded-md p-2 focus:ring-blue-500 focus:border-blue-500 font-mono text-sm bg-slate-50"
-                  value={newTemplate.content}
-                  onChange={e => setNewTemplate({...newTemplate, content: e.target.value})}
-                  placeholder="Gross or microscopic description..."
-                ></textarea>
+
+              <div className="space-y-4">
+                {(newTemplate.content) && (
+                  <div className="bg-amber-50 p-3 rounded border border-amber-200 flex justify-between items-center">
+                    <p className="text-[10px] text-amber-700 font-medium">Unstructured content found. Segregate into sections for better report entry?</p>
+                    <button 
+                      onClick={handleAutoParse}
+                      disabled={aiParsing}
+                      className="px-2 py-1 bg-amber-600 text-white text-[10px] font-bold uppercase rounded hover:bg-amber-700 disabled:opacity-50 transition flex items-center gap-1"
+                    >
+                      {aiParsing ? "Parsing..." : "✨ AI Segregate"}
+                    </button>
+                  </div>
+                )}
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-[10px] uppercase font-bold text-slate-400 tracking-widest mb-1.5">Template Clinical History</label>
+                    <textarea 
+                      rows={3}
+                      className="w-full border border-slate-300 rounded-md p-2 focus:ring-blue-500 focus:border-blue-500 text-sm bg-slate-50"
+                      value={newTemplate.clinicalHistory}
+                      onChange={e => setNewTemplate({...newTemplate, clinicalHistory: e.target.value})}
+                      placeholder="Provisional diagnosis or history..."
+                    ></textarea>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] uppercase font-bold text-slate-400 tracking-widest mb-1.5">Gross Findings</label>
+                    <textarea 
+                      rows={3}
+                      className="w-full border border-slate-300 rounded-md p-2 focus:ring-blue-500 focus:border-blue-500 text-sm bg-slate-50"
+                      value={newTemplate.grossFindings}
+                      onChange={e => setNewTemplate({...newTemplate, grossFindings: e.target.value})}
+                      placeholder="Gross description..."
+                    ></textarea>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] uppercase font-bold text-slate-400 tracking-widest mb-1.5">Microscopic Findings</label>
+                  <textarea 
+                    rows={4}
+                    className="w-full border border-slate-300 rounded-md p-2 focus:ring-blue-500 focus:border-blue-500 text-sm bg-slate-50 font-mono"
+                    value={newTemplate.microscopicFindings}
+                    onChange={e => setNewTemplate({...newTemplate, microscopicFindings: e.target.value})}
+                    placeholder="Microscopic details..."
+                  ></textarea>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-[10px] uppercase font-bold text-slate-400 tracking-widest mb-1.5">Final Diagnosis</label>
+                    <textarea 
+                      rows={3}
+                      className="w-full border border-slate-300 rounded-md p-2 focus:ring-blue-500 focus:border-blue-500 text-sm bg-slate-50 font-bold"
+                      value={newTemplate.finalDiagnosis}
+                      onChange={e => setNewTemplate({...newTemplate, finalDiagnosis: e.target.value})}
+                      placeholder="Final opinion..."
+                    ></textarea>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] uppercase font-bold text-slate-400 tracking-widest mb-1.5">IHC/Advice</label>
+                    <textarea 
+                      rows={3}
+                      className="w-full border border-slate-300 rounded-md p-2 focus:ring-blue-500 focus:border-blue-500 text-sm bg-slate-50"
+                      value={newTemplate.ihcAdvice}
+                      onChange={e => setNewTemplate({...newTemplate, ihcAdvice: e.target.value})}
+                      placeholder="Special stains or advice..."
+                    ></textarea>
+                  </div>
+                </div>
               </div>
+
               <div className="flex items-center gap-2">
                 <input 
                   type="checkbox" 
@@ -325,8 +482,43 @@ export default function Templates() {
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
               </button>
             </div>
-            <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 mt-4 overflow-y-auto max-h-[60vh]">
-              <pre className="whitespace-pre-wrap font-mono text-sm text-slate-700">{viewingTemplate.content}</pre>
+            <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 mt-4 overflow-y-auto max-h-[60vh] space-y-4">
+              {viewingTemplate.clinicalHistory && (
+                <div>
+                  <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Clinical History</h4>
+                  <p className="text-sm text-slate-700">{viewingTemplate.clinicalHistory}</p>
+                </div>
+              )}
+              {viewingTemplate.grossFindings && (
+                <div>
+                  <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Gross Findings</h4>
+                  <p className="text-sm text-slate-700">{viewingTemplate.grossFindings}</p>
+                </div>
+              )}
+              {viewingTemplate.microscopicFindings && (
+                <div>
+                  <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Microscopic Findings</h4>
+                  <p className="text-sm text-slate-700 font-mono italic">{viewingTemplate.microscopicFindings}</p>
+                </div>
+              )}
+              {viewingTemplate.finalDiagnosis && (
+                <div>
+                  <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Final Diagnosis</h4>
+                  <p className="text-sm text-slate-900 font-bold">{viewingTemplate.finalDiagnosis}</p>
+                </div>
+              )}
+              {viewingTemplate.ihcAdvice && (
+                <div>
+                  <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">IHC / Special Stains</h4>
+                  <p className="text-sm text-slate-700">{viewingTemplate.ihcAdvice}</p>
+                </div>
+              )}
+              {viewingTemplate.content && (
+                <div>
+                  <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Legacy Content</h4>
+                  <pre className="whitespace-pre-wrap font-mono text-sm text-slate-700">{viewingTemplate.content}</pre>
+                </div>
+              )}
             </div>
             <div className="flex justify-end gap-3 pt-4 mt-6 border-t border-slate-100">
               <button 

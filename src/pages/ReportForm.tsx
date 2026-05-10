@@ -191,12 +191,32 @@ export default function ReportForm() {
     setSuggestedTemplates(filtered);
   }, [formData.organSystem, formData.clinicalHistory, templates]);
 
-  const applyTemplate = (content: string) => {
+  const applyTemplate = (t: any) => {
     setFormData(prev => ({
       ...prev,
-      microscopicFindings: content
+      clinicalHistory: t.clinicalHistory || prev.clinicalHistory,
+      grossFindings: t.grossFindings || prev.grossFindings,
+      microscopicFindings: t.microscopicFindings || t.content || prev.microscopicFindings,
+      finalDiagnosis: t.finalDiagnosis || prev.finalDiagnosis,
+      comments: t.comments || prev.comments
     }));
-    setActiveTab('microscopic');
+    
+    // Auto-select markers if provided in a specific format (comma separated string)
+    if (t.ihcAdvice && typeof t.ihcAdvice === 'string') {
+      const markers = t.ihcAdvice.split(',').map((s: string) => s.trim().toUpperCase());
+      const validMarkers = IHC_MARKERS.filter(m => markers.includes(m.toUpperCase()));
+      if (validMarkers.length > 0) {
+        setFormData(prev => ({
+          ...prev, 
+          ihcAdvice: Array.from(new Set([...prev.ihcAdvice, ...validMarkers]))
+        }));
+      }
+    }
+    
+    // Jump to the first section that was updated
+    if (t.clinicalHistory || t.grossFindings) setActiveTab('clinical');
+    else if (t.microscopicFindings || t.content || t.ihcAdvice) setActiveTab('microscopic');
+    else if (t.finalDiagnosis) setActiveTab('diagnosis');
   };
   const handleImproveText = async (field: 'grossFindings' | 'microscopicFindings') => {
     if (!formData[field]) return;
@@ -227,17 +247,25 @@ export default function ReportForm() {
         {suggestedTemplates.slice(0, 4).map(t => (
           <button 
             key={t.id}
-            onClick={() => applyTemplate(t.content)}
+            onClick={() => applyTemplate(t)}
             className="w-full text-left p-2.5 bg-white hover:bg-blue-100 rounded-lg border border-blue-200 transition group shadow-sm hover:shadow"
           >
             <div className="flex justify-between items-center">
               <span className="text-xs font-bold text-slate-700">{t.name}</span>
               <span className="text-[10px] text-blue-400 group-hover:text-blue-600 font-bold">Apply →</span>
             </div>
-            {(t.organSystem || t.clinicalKeywords) && (
-              <div className="flex gap-2 mt-1">
-                {t.organSystem && <span className="text-[8px] px-1.5 py-0.5 bg-slate-100 text-slate-500 rounded uppercase font-bold">{t.organSystem}</span>}
-                {t.clinicalKeywords && <span className="text-[8px] text-blue-400 italic truncate">Matched finding: {t.clinicalKeywords}</span>}
+            {(t.organSystem || t.clinicalKeywords || t.clinicalHistory || t.grossFindings || t.microscopicFindings || t.finalDiagnosis) && (
+              <div className="space-y-1.5 mt-2">
+                <div className="flex flex-wrap gap-1">
+                  {t.clinicalHistory && <span className="text-[7px] px-1 bg-indigo-50 text-indigo-500 rounded uppercase font-bold border border-indigo-100">Clinical</span>}
+                  {t.grossFindings && <span className="text-[7px] px-1 bg-green-50 text-green-500 rounded uppercase font-bold border border-green-100">Gross</span>}
+                  {t.microscopicFindings && <span className="text-[7px] px-1 bg-amber-50 text-amber-500 rounded uppercase font-bold border border-amber-100">Micro</span>}
+                  {t.finalDiagnosis && <span className="text-[7px] px-1 bg-rose-50 text-rose-500 rounded uppercase font-bold border border-rose-100">Diagnosis</span>}
+                </div>
+                <div className="flex gap-2">
+                  {t.organSystem && <span className="text-[8px] px-1.5 py-0.5 bg-slate-100 text-slate-500 rounded uppercase font-bold">{t.organSystem}</span>}
+                  {t.clinicalKeywords && <span className="text-[8px] text-blue-400 italic truncate">Match: {t.clinicalKeywords}</span>}
+                </div>
               </div>
             )}
           </button>

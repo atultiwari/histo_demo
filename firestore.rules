@@ -53,11 +53,16 @@ service cloud.firestore {
     }
 
     function isValidTemplate(data) {
-      return data.keys().hasAll(['authorId', 'name', 'content', 'isPublic', 'createdAt', 'updatedAt'])
+      return data.keys().hasAll(['authorId', 'name', 'isPublic', 'createdAt', 'updatedAt'])
         && data.authorId == request.auth.uid
         && data.name is string && data.name.size() <= 100
-        && data.content is string && data.content.size() <= 50000
         && data.isPublic is bool
+        && (data.get('content', '') is string && data.get('content', '').size() <= 50000)
+        && (data.get('clinicalHistory', '') is string && data.get('clinicalHistory', '').size() <= 50000)
+        && (data.get('grossFindings', '') is string && data.get('grossFindings', '').size() <= 50000)
+        && (data.get('microscopicFindings', '') is string && data.get('microscopicFindings', '').size() <= 50000)
+        && (data.get('ihcAdvice', '') is string && data.get('ihcAdvice', '').size() <= 50000)
+        && (data.get('finalDiagnosis', '') is string && data.get('finalDiagnosis', '').size() <= 50000)
         && (data.get('organSystem', '') is string && data.get('organSystem', '').size() <= 100)
         && (data.get('clinicalKeywords', '') is string && data.get('clinicalKeywords', '').size() <= 500)
         && data.createdAt == request.time
@@ -109,7 +114,7 @@ service cloud.firestore {
       allow create: if isSignedIn() && isValidId(templateId) && isValidTemplate(incoming());
       allow update: if isSignedIn() && isValidId(templateId) && (
         (existing().authorId == request.auth.uid && (
-          incoming().diff(existing()).affectedKeys().hasOnly(['name', 'content', 'isPublic', 'organSystem', 'clinicalKeywords', 'updatedAt'])
+          incoming().diff(existing()).affectedKeys().hasOnly(['name', 'content', 'isPublic', 'organSystem', 'clinicalKeywords', 'clinicalHistory', 'grossFindings', 'microscopicFindings', 'ihcAdvice', 'finalDiagnosis', 'updatedAt'])
           && incoming().updatedAt == request.time
         )) || isAdmin()
       );
