@@ -2,108 +2,122 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
+    // Default Deny
     match /{document=**} {
       allow read, write: if false;
     }
 
+    // Primitives
     function isSignedIn() {
       return request.auth != null;
     }
 
     function isAdmin() {
-      return isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "Admin";
-    }
-
-    function existing() {
-      return resource.data;
+      return isSignedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
     }
 
     function incoming() {
       return request.resource.data;
     }
 
-    function isValidId(id) {
-      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    function existing() {
+      return resource.data;
     }
 
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // Entity Validations
     function isValidUser(data) {
-      return data.keys().hasAll(["email", "name", "role", "createdAt", "updatedAt"])
+      return data.keys().hasAll(['email', 'name', 'role', 'createdAt', 'updatedAt'])
         && data.keys().size() == 5
-        && data.email is string && data.email.size() > 0 && data.email.size() <= 200
-        && data.name is string && data.name.size() > 0 && data.name.size() <= 100
-        && data.role is string && (data.role == "Pathologist" || data.role == "Technician" || data.role == "Admin")
+        && data.email is string && data.email.size() <= 200
+        && data.name is string && data.name.size() <= 100
+        && data.role == 'Pathologist' 
         && data.createdAt == request.time
         && data.updatedAt == request.time;
-    }
-
-    function isValidUserUpdate(existingData, incomingData) {
-      return incomingData.diff(existingData).affectedKeys().hasOnly(["name", "updatedAt"])
-        && incomingData.name is string && incomingData.name.size() > 0 && incomingData.name.size() <= 100
-        && incomingData.updatedAt == request.time;
-    }
-
-    match /users/{userId} {
-      allow get: if isSignedIn() && (request.auth.uid == userId || isAdmin());
-      allow list: if isSignedIn() && isAdmin();
-      allow create: if isSignedIn() && request.auth.uid == userId && isValidUser(incoming());
-      allow update: if isSignedIn() && request.auth.uid == userId && isValidUserUpdate(existing(), incoming());
     }
 
     function isValidReport(data) {
-      return data.keys().hasAll(["authorId", "patientName", "age", "gender", "hospitalNumber", "reportNumber", "status", "createdAt", "updatedAt"])
-        // Optional fields check would go here if we were strictly enforcing size on all optional fields, but let's allow them
+      return data.keys().hasAll(['authorId', 'patientName', 'age', 'gender', 'hospitalNumber', 'reportNumber', 'status', 'createdAt', 'updatedAt'])
         && data.authorId == request.auth.uid
         && data.patientName is string && data.patientName.size() <= 200
-        && data.age is number
-        && data.gender is string && data.gender.size() <= 20
+        && data.age is int && data.age >= 0 && data.age <= 150
+        && data.gender in ['Male', 'Female', 'Other']
         && data.hospitalNumber is string && data.hospitalNumber.size() <= 50
-        && data.reportNumber is string && data.reportNumber.size() <= 50
-        && data.status is string && (data.status == "Pending" || data.status == "Finalized" || data.status == "Archived")
+        && data.reportNumber is string && data.reportNumber.size() <= 64
+        && data.status == 'Pending'
         && data.createdAt == request.time
         && data.updatedAt == request.time;
     }
 
-    function isValidReportUpdate(existingData, incomingData) {
-      return incomingData.diff(existingData).affectedKeys().hasOnly(["patientName", "age", "gender", "hospitalNumber", "reportNumber", "referringDoctor", "dateOfProcedure", "dateOfReport", "specimenReceivedDate", "organSystem", "clinicalHistory", "grossFindings", "microscopicFindings", "ihcAdvice", "finalDiagnosis", "comments", "status", "updatedAt"])
-        && incomingData.authorId == existingData.authorId
-        && incomingData.updatedAt == request.time;
+    function isValidTemplate(data) {
+      return data.keys().hasAll(['authorId', 'name', 'content', 'isPublic', 'createdAt', 'updatedAt'])
+        && data.keys().size() == 6
+        && data.authorId == request.auth.uid
+        && data.name is string && data.name.size() <= 100
+        && data.content is string && data.content.size() <= 50000
+        && data.isPublic is bool
+        && data.createdAt == request.time
+        && data.updatedAt == request.time;
+    }
+
+    // Match Blocks
+    match /users/{userId} {
+      allow get: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+      allow list: if isAdmin();
+      allow create: if isSignedIn() && request.auth.uid == userId && isValidUser(incoming());
+      allow update: if (
+        isSignedIn() && request.auth.uid == userId && (
+          incoming().diff(existing()).affectedKeys().hasOnly(['name', 'updatedAt'])
+          && incoming().name is string && incoming().name.size() <= 100
+          && incoming().updatedAt == request.time
+        )
+      ) || isAdmin();
     }
 
     match /reports/{reportId} {
       allow get: if isSignedIn() && isValidId(reportId) && (existing().authorId == request.auth.uid || isAdmin());
       allow list: if isSignedIn() && (resource.data.authorId == request.auth.uid || isAdmin());
       allow create: if isSignedIn() && isValidId(reportId) && isValidReport(incoming());
-      // The master gate: Only allow update if not Finalized/Archived (unless admin)
-      allow update: if isSignedIn() && isValidId(reportId) 
-        && (existing().authorId == request.auth.uid || isAdmin())
-        && isValidReportUpdate(existing(), incoming());
-      allow delete: if isSignedIn() && isValidId(reportId) && (existing().authorId == request.auth.uid || isAdmin());
-    }
-
-    function isValidTemplate(data) {
-      return data.keys().hasAll(["authorId", "name", "content", "isPublic", "createdAt", "updatedAt"])
-        && data.keys().size() == 6
-        && data.authorId == request.auth.uid
-        && data.name is string && data.name.size() > 0 && data.name.size() <= 100
-        && data.content is string && data.content.size() <= 10000
-        && data.isPublic is bool
-        && data.createdAt == request.time
-        && data.updatedAt == request.time;
-    }
-
-    function isValidTemplateUpdate(existingData, incomingData) {
-      return incomingData.diff(existingData).affectedKeys().hasOnly(["name", "content", "isPublic", "updatedAt"])
-        && incomingData.authorId == existingData.authorId
-        && (incomingData.get('isPublic', false) is bool)
-        && incomingData.updatedAt == request.time;
+      allow update: if (
+        isSignedIn() && isValidId(reportId) && (
+          (existing().authorId == request.auth.uid && existing().status == 'Pending' && (
+            (incoming().diff(existing()).affectedKeys().hasOnly([
+              'patientName', 'age', 'gender', 'hospitalNumber', 'reportNumber', 
+              'referringDoctor', 'dateOfProcedure', 'dateOfReport', 'specimenReceivedDate', 
+              'organSystem', 'clinicalHistory', 'grossFindings', 'microscopicFindings', 
+              'ihcAdvice', 'finalDiagnosis', 'comments', 'status', 'updatedAt'
+            ]) && incoming().status in ['Pending', 'Finalized'] && incoming().updatedAt == request.time)
+          ))
+          || (existing().authorId == request.auth.uid && existing().status == 'Finalized' && (
+            incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt'])
+            && incoming().status == 'Archived'
+            && incoming().updatedAt == request.time
+          ))
+          || isAdmin()
+        )
+      );
+      allow delete: if isAdmin();
     }
 
     match /templates/{templateId} {
       allow get: if isSignedIn() && isValidId(templateId) && (existing().authorId == request.auth.uid || existing().isPublic == true);
-      allow list: if isSignedIn() && (resource.data.authorId == request.auth.uid || resource.data.isPublic == true);
+      allow list: if isSignedIn() && (resource.data.isPublic == true || resource.data.authorId == request.auth.uid);
       allow create: if isSignedIn() && isValidId(templateId) && isValidTemplate(incoming());
-      allow update: if isSignedIn() && isValidId(templateId) && existing().authorId == request.auth.uid && isValidTemplateUpdate(existing(), incoming());
-      allow delete: if isSignedIn() && isValidId(templateId) && existing().authorId == request.auth.uid;
+      allow update: if isSignedIn() && isValidId(templateId) && (
+        (existing().authorId == request.auth.uid && (
+          incoming().diff(existing()).affectedKeys().hasOnly(['name', 'content', 'isPublic', 'updatedAt'])
+          && incoming().updatedAt == request.time
+        )) || isAdmin()
+      );
+      allow delete: if isSignedIn() && isValidId(templateId) && (existing().authorId == request.auth.uid || isAdmin());
+    }
+    
+    match /admins/{adminId} {
+       allow read: if isSignedIn() && request.auth.uid == adminId;
     }
   }
 }
+

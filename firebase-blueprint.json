@@ -71,6 +71,17 @@
     "/templates/{templateId}": {
       "schema": { "$ref": "Template" },
       "description": "User saved templates."
+    },
+    "/admins/{adminId}": {
+      "schema": {
+        "title": "Admin",
+        "type": "object",
+        "properties": {
+          "email": { "type": "string" }
+        },
+        "required": ["email"]
+      },
+      "description": "List of admin uids."
     }
   }
 }
